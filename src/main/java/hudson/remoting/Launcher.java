@@ -410,7 +410,7 @@ public class Launcher {
 
     public static void main(InputStream is, OutputStream os, Mode mode, boolean performPing) throws IOException, InterruptedException {
         ExecutorService executor = Executors.newCachedThreadPool();
-        Channel channel = new Channel("channel", executor, mode, is, os);
+        Channel channel = Channel.createChannel( "channel", executor, mode, is, os );
         System.err.println("channel started");
         long timeout = 1000 * Long.parseLong(
                 System.getProperty("hudson.remoting.Launcher.pingTimeoutSec", "240")),

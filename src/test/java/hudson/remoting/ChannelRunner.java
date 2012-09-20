@@ -70,7 +70,10 @@ interface ChannelRunner {
             Thread t = new Thread("south bridge runner") {
                 public void run() {
                     try {
-                        Channel s = new Channel("south", executor, Mode.BINARY, in2, out1, null, false, null, createCapability());
+                        Channel s = Channel.createChannel( "south",
+                                                 executor, ClassicCommandTransport.create( Mode.BINARY, in2, out1, null,
+                                                                                           null, createCapability() ),
+                                                 false, null );
                         s.join();
                         System.out.println("south completed");
                     } catch (IOException e) {
@@ -84,7 +87,8 @@ interface ChannelRunner {
             };
             t.start();
 
-            return new Channel("north", executor, Mode.BINARY, in1, out2, null, false, null, createCapability());
+            return Channel.createChannel( "north", executor, ClassicCommandTransport.create( Mode.BINARY, in1, out2, null, null,
+                                                                                   createCapability() ), false, null );
         }
 
         public void stop(Channel channel) throws Exception {
@@ -143,7 +147,7 @@ interface ChannelRunner {
                 System.out.println("Recording to "+f);
                 out = new TeeOutputStream(out,new FileOutputStream(f));
             }
-            return new Channel("north", executor, proc.getInputStream(), out);
+            return Channel.createChannel( "north", executor, proc.getInputStream(), out );
         }
 
         public void stop(Channel channel) throws Exception {

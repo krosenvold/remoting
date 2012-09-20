@@ -235,9 +235,8 @@ public class Engine extends Thread {
                     }
                 }
 
-                final Channel channel = new Channel("channel", executor,
-                        in,
-                        new BufferedOutputStream(s.getOutputStream()));
+                final Channel channel =
+                    Channel.createChannel( "channel", executor, in, new BufferedOutputStream( s.getOutputStream() ) );
                 
                 listener.status("Connected");
                 channel.join();

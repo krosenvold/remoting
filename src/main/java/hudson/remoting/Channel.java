@@ -50,7 +50,6 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.net.URL;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -275,6 +274,41 @@ public class Channel implements VirtualChannel, IChannel {
      */
     /*package*/ final ClassLoader baseClassLoader;
 
+    public static Channel createChannel( String name, ExecutorService exec, InputStream is, OutputStream os )
+        throws IOException
+    {
+        return createChannel( name, exec, Mode.BINARY,  is, os);
+    }
+
+    public static Channel createChannel( String name, ExecutorService exec, Mode mode, InputStream is, OutputStream os )
+        throws IOException
+    {
+        return createChannel(  name, exec, ClassicCommandTransport.create( mode, is, os, null, null, new Capability() ),
+                            false, null );
+    }
+
+    public static Channel createChannel( String name, ExecutorService exec, InputStream is, OutputStream os,
+                                         OutputStream header )
+        throws IOException
+    {
+        return createChannel( name, exec, Mode.BINARY, is, os, header, false );
+    }
+
+    public static Channel createChannel( String name, ExecutorService exec, Mode mode, InputStream is, OutputStream os,
+                                         OutputStream header )
+        throws IOException
+    {
+        return createChannel( name, exec, mode, is, os, header, false );
+    }
+
+    public static Channel createChannel( String name, ExecutorService exec, Mode mode, InputStream is, OutputStream os,
+                                         OutputStream header, boolean restricted )
+        throws IOException
+    {
+        return createChannel( name, exec, ClassicCommandTransport.create( mode, is, os, header, null, new Capability() ),
+                            restricted, null );
+    }
+
     /**
      * Communication mode used in conjunction with {@link ClassicCommandTransport}.
      * 
@@ -328,25 +362,31 @@ public class Channel implements VirtualChannel, IChannel {
         protected InputStream wrap(InputStream is) { return is; }
     }
 
-    public Channel(String name, ExecutorService exec, InputStream is, OutputStream os) throws IOException {
-        this(name,exec,Mode.BINARY,is,os,null);
+    public static Channel createChannel( String name, ExecutorService exec, CommandTransport transport,
+                                         boolean restricted, ClassLoader base )
+        throws IOException
+    {
+        final Channel channel = new Channel( name, exec, transport, restricted, base );
+        transport.setup(channel, new CommandReceiver() {
+            public void handle(Command cmd) {
+                channel.lastHeard = System.currentTimeMillis();
+                if (logger.isLoggable(Level.FINE))
+                    logger.fine("Received " + cmd);
+                try {
+                    cmd.execute(channel);
+                } catch (Throwable t) {
+                    logger.log(Level.SEVERE, "Failed to execute command " + cmd + " (channel " + channel.name + ")", t);
+                    logger.log(Level.SEVERE, "This command is created here", cmd.createdAt);
+                }
+            }
+
+            public void terminate(IOException e) {
+                channel.terminate(e);
+            }
+        });
+        return channel;
     }
 
-    public Channel(String name, ExecutorService exec, Mode mode, InputStream is, OutputStream os) throws IOException {
-        this(name,exec,mode,is,os,null);
-    }
-
-    public Channel(String name, ExecutorService exec, InputStream is, OutputStream os, OutputStream header) throws IOException {
-        this(name,exec,Mode.BINARY,is,os,header);
-    }
-
-    public Channel(String name, ExecutorService exec, Mode mode, InputStream is, OutputStream os, OutputStream header) throws IOException {
-        this(name,exec,mode,is,os,header,false);
-    }
-
-    public Channel(String name, ExecutorService exec, Mode mode, InputStream is, OutputStream os, OutputStream header, boolean restricted) throws IOException {
-        this(name,exec,mode,is,os,header,restricted,null);
-    }
 
     /**
      * Creates a new channel.
@@ -354,20 +394,7 @@ public class Channel implements VirtualChannel, IChannel {
      * @param name
      *      Human readable name of this channel. Used for debug/logging. Can be anything.
      * @param exec
-     *      Commands sent from the remote peer will be executed by using this {@link Executor}.
-     * @param mode
-     *      The encoding to be used over the stream.
-     * @param is
-     *      Stream connected to the remote peer. It's the caller's responsibility to do
-     *      buffering on this stream, if that's necessary.
-     * @param os
-     *      Stream connected to the remote peer. It's the caller's responsibility to do
-     *      buffering on this stream, if that's necessary.
-     * @param header
-     *      If non-null, receive the portion of data in <tt>is</tt> before
-     *      the data goes into the "binary mode". This is useful
-     *      when the established communication channel might include some data that might
-     *      be useful for debugging/trouble-shooting.
+     *      Commands sent from the remote peer will be executed by using this {@link ExecutorService}.
      * @param base
      *      Specify the classloader used for deserializing remote commands.
      *      This is primarily related to {@link #getRemoteProperty(Object)}. Sometimes two parties
@@ -382,31 +409,10 @@ public class Channel implements VirtualChannel, IChannel {
      *      Note that it still allows the remote end to deserialize arbitrary object graph
      *      (provided that all the classes are already available in this JVM), so exactly how
      *      safe the resulting behavior is is up to discussion.
-     */
-    public Channel(String name, ExecutorService exec, Mode mode, InputStream is, OutputStream os, OutputStream header, boolean restricted, ClassLoader base) throws IOException {
-        this(name,exec,mode,is,os,header,restricted,base,new Capability());
-    }
-
-    /*package*/ Channel(String name, ExecutorService exec, Mode mode, InputStream is, OutputStream os, OutputStream header, boolean restricted, ClassLoader base, Capability capability) throws IOException {
-        this(name,exec, ClassicCommandTransport.create(mode, is, os, header, base, capability),restricted,base);
-    }
-
-    /**
-     * Creates a new channel.
-     *
-     * @param name
-     *      See {@link #Channel(String, ExecutorService, Mode, InputStream, OutputStream, OutputStream, boolean, ClassLoader)}
-     * @param exec
-     *      See {@link #Channel(String, ExecutorService, Mode, InputStream, OutputStream, OutputStream, boolean, ClassLoader)}
-     * @param transport
-     *      The transport that we run {@link Channel} on top of.
-     * @param base
-     *      See {@link #Channel(String, ExecutorService, Mode, InputStream, OutputStream, OutputStream, boolean, ClassLoader)}
-     * @param restricted
-     *      See {@link #Channel(String, ExecutorService, Mode, InputStream, OutputStream, OutputStream, boolean, ClassLoader)}
      * @since 2.13
      */
-    public Channel(String name, ExecutorService exec, CommandTransport transport, boolean restricted, ClassLoader base) throws IOException {
+    private Channel( String name, ExecutorService exec, CommandTransport transport, boolean restricted,
+                     ClassLoader base ) throws IOException {
         this.name = name;
         this.executor = new InterceptingExecutorService(exec);
         this.isRestricted = restricted;
@@ -425,23 +431,6 @@ public class Channel implements VirtualChannel, IChannel {
 
         this.transport = transport;
 
-        transport.setup(this, new CommandReceiver() {
-            public void handle(Command cmd) {
-                lastHeard = System.currentTimeMillis();
-                if (logger.isLoggable(Level.FINE))
-                    logger.fine("Received " + cmd);
-                try {
-                    cmd.execute(Channel.this);
-                } catch (Throwable t) {
-                    logger.log(Level.SEVERE, "Failed to execute command " + cmd + " (channel " + Channel.this.name + ")", t);
-                    logger.log(Level.SEVERE, "This command is created here", cmd.createdAt);
-                }
-            }
-
-            public void terminate(IOException e) {
-                Channel.this.terminate(e);
-            }
-        });
     }
 
     /**
